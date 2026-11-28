@@ -25,14 +25,12 @@ button:hover,button:focus-visible{background:#6b3f1a;outline:none}
 <canvas id="cv"></canvas><div id="ov"><div id="bx"></div></div>
 <script>
 "use strict";
-/* ===== Helpers & constants ===== */
 const R=Math.random,rr=(a,b)=>a+R()*(b-a),ri=(a,b)=>Math.floor(rr(a,b+1)),TAU=Math.PI*2;
-const T=40,WH=40,MW=56,MH=44,CA=Math.cos(.88),SA=Math.sin(.88),CD=520,CF=650; // CA/SA: camera pitch (~50 deg), CD: camera distance, CF: focal length
-const WC=['#cfd6dd','#6fe38a','#5cb8ff','#c77dff','#ffb347','#ff5a5a','#ff5ad0','#40f0e0','#fff2a0']; // weapon tier / trail colours
-const AC=['#7a5b3a','#8a8f98','#4f8fd0','#8a4fd0','#d0a030','#d04a4a','#d05aa8','#3ab8b0','#f0e0a0']; // armor tier colours
+const T=40,WH=40,MW=56,MH=44,CA=Math.cos(.88),SA=Math.sin(.88),CD=520,CF=650;
+const WC=['#cfd6dd','#6fe38a','#5cb8ff','#c77dff','#ffb347','#ff5a5a','#ff5ad0','#40f0e0','#fff2a0'];
+const AC=['#7a5b3a','#8a8f98','#4f8fd0','#8a4fd0','#d0a030','#d04a4a','#d05aa8','#3ab8b0','#f0e0a0'];
 const ED={skel:{hp:22,sp:110,r:11,xp:6,g:3},cult:{hp:16,sp:70,r:11,xp:9,g:5},golem:{hp:95,sp:48,r:17,xp:25,g:14},
   bat:{hp:9,sp:175,r:8,xp:4,g:2},bomber:{hp:14,sp:125,r:10,xp:7,g:4},wraith:{hp:26,sp:60,r:11,xp:12,g:7},boss:{hp:230,sp:62,r:24,xp:150,g:90}};
-/* Relics: passive, non-stacking items sold at the market (r = rarity 0-3). Effects are checked via player.rel[id]. */
 const RL=[
  {id:'coin',n:'Lucky Coin',r:0,d:'+50% gold from drops.'},
  {id:'tome',n:'Scholars Tome',r:0,d:'+30% XP gained.'},
@@ -43,12 +41,11 @@ const RL=[
  {id:'heart',n:'Iron Heart',r:2,d:'+40 Max HP, healed on purchase.',f:p=>{p.mhp+=40;p.hp+=40}},
  {id:'phoenix',n:'Phoenix Feather',r:3,d:'Once per run: when you would die, revive with half HP.'}];
 const RN=['Common','Rare','Epic','Legendary'],RC=['#b9b2a2','#5cb8ff','#c77dff','#ffb347'],PB=[70,150,280,460];
-const WN=['Worn Sword','Iron Blade','Steel Saber','Mythril Edge','Gilded Claymore','Emberbrand','Voidreaver','Stormbringer','Dawnbreaker'],AN=['Tattered Garb','Iron Mail','Steel Plate','Mythril Mail','Gilded Plate','Ember Aegis','Void Carapace','Storm Plate','Dawn Aegis'],TN=['white','green','blue','purple','amber','red','magenta','cyan','radiant'],MT=8; // MT = maximum weapon/armor tier
+const WN=['Worn Sword','Iron Blade','Steel Saber','Mythril Edge','Gilded Claymore','Emberbrand','Voidreaver','Stormbringer','Dawnbreaker'],AN=['Tattered Garb','Iron Mail','Steel Plate','Mythril Mail','Gilded Plate','Ember Aegis','Void Carapace','Storm Plate','Dawn Aegis'],TN=['white','green','blue','purple','amber','red','magenta','cyan','radiant'],MT=8;
 
-/* ===== Procedural audio ===== */
 class SoundEngine{
   constructor(){this.c=null}
-  init(){ // must run after a user gesture
+  init(){
     if(!this.c){const C=window.AudioContext||window.webkitAudioContext;if(!C)return;this.c=new C();
       const n=this.c.sampleRate*.5,b=this.c.createBuffer(1,n,this.c.sampleRate),d=b.getChannelData(0);
       for(let i=0;i<n;i++)d[i]=R()*2-1;this.nb=b}
@@ -66,34 +63,31 @@ class SoundEngine{
   lvl(){[523,659,784,1047].forEach((f,i)=>this.tone(f,'square',.25,.1,0,i*.1))}
 }
 
-/* ===== Particles ===== */
 class Particle{
   constructor(x,y,a,s,c,l,g=0,z=3){this.x=x;this.y=y;this.vx=Math.cos(a)*s;this.vy=Math.sin(a)*s;this.c=c;this.l=this.m=l;this.g=g;this.z=z}
   update(dt){this.l-=dt;this.x+=this.vx*dt;this.y+=this.vy*dt;this.vy+=this.g*dt;this.vx*=.985}
   draw(c,o){const a=Math.max(0,this.l/this.m);c.globalAlpha=a;c.fillStyle=this.c;const s=this.z*(.4+a)*o.s;c.fillRect(o.x-s/2,o.y-s/2,s,s)}
 }
 
-/* ===== Dungeon (room-and-corridor generation) ===== */
 class Dungeon{
   constructor(mk,boss){
     this.g=Array.from({length:MH},()=>Array(MW).fill(1));
     this.ex=Array.from({length:MH},()=>Array(MW).fill(0));
+    this.pg=Array.from({length:MH},()=>new Uint8Array(MW));
     this.vis=Array.from({length:MH},()=>new Uint8Array(MW));
-    this.lt=Array.from({length:MH},()=>new Float32Array(MW)); // smoothed per-tile light level used for rendering
-    this.gt=Array.from({length:MH},()=>new Float32Array(MW)); // gate height per tile (0 = open, 1 = fully raised)
+    this.lt=Array.from({length:MH},()=>new Float32Array(MW));
+    this.gt=Array.from({length:MH},()=>new Float32Array(MW));
     this.rooms=[];
-    if(mk){ // the market is a pre-laid-out hall, not generated
+    if(mk){
       const r={x:10,y:15,w:24,h:13,cx:22,cy:21,type:'market'};this.rooms.push(r);
       for(let j=r.y;j<r.y+r.h;j++)for(let k=r.x;k<r.x+r.w;k++)this.g[j][k]=0;return}
-    /* Binary Space Partitioning: recursively split the map, carve one room per leaf,
-       then join the two halves of every split with an L-shaped corridor. */
     const carve=r=>{for(let j=r.y;j<r.y+r.h;j++)for(let k=r.x;k<r.x+r.w;k++)this.g[j][k]=0};
     const link=(a,b)=>{
       for(let x=Math.min(a.cx,b.cx);x<=Math.max(a.cx,b.cx)+1;x++){this.g[a.cy][x]=0;this.g[a.cy+1][x]=0}
       for(let y=Math.min(a.cy,b.cy);y<=Math.max(a.cy,b.cy)+1;y++){this.g[y][b.cx]=0;this.g[y][b.cx+1]=0}};
     const split=(n,dp)=>{
       const cw=n.w>=26,ch=n.h>=22;
-      if(dp>=3||(!cw&&!ch)){ // leaf: place a room inside it
+      if(dp>=3||(!cw&&!ch)){
         const w=ri(6,Math.min(11,n.w-3)),h=ri(5,Math.min(8,n.h-3)),x=n.x+ri(1,n.w-w-2),y=n.y+ri(1,n.h-h-2);
         const r={x,y,w,h,cx:x+(w>>1),cy:y+(h>>1),type:'combat'};this.rooms.push(r);carve(r);return r}
       const v=cw&&(!ch||n.w/n.h>1.2||(n.w/n.h>.8&&R()<.5));let a,b;
@@ -102,35 +96,34 @@ class Dungeon{
       link(a,b);return R()<.5?a:b};
     split({x:1,y:1,w:MW-2,h:MH-2},0);
     const rs=this.rooms;rs[0].type='start';
-    let far=rs[1],fd=0;rs.forEach(r=>{const q=Math.hypot(r.cx-rs[0].cx,r.cy-rs[0].cy);if(q>fd){fd=q;far=r}});far.type=boss?'boss':'exit'; // exit = farthest room from start
-    const mid=rs.filter(r=>r.type==='combat');if(R()<.3)mid[ri(0,mid.length-1)].type='treasure'; // treasure rooms are rare
+    let far=rs[1],fd=0;rs.forEach(r=>{const q=Math.hypot(r.cx-rs[0].cx,r.cy-rs[0].cy);if(q>fd){fd=q;far=r}});far.type=boss?'boss':'exit';
+    const mid=rs.filter(r=>r.type==='combat');if(R()<.3)mid[ri(0,mid.length-1)].type='treasure';
     if(boss){const b=far,all=(x0,y0,x1,y1)=>{for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)if(x<1||y<1||x>=MW-1||y>=MH-1||this.g[y][x]===0)return false;return true};
-      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]].sort(()=>R()-.5)){ // carve the hidden final room behind the boss room (the only way to it)
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]].sort(()=>R()-.5)){
         const fx=dx>0?b.x+b.w+4:dx<0?b.x-12:b.cx-3,fy=dy>0?b.y+b.h+4:dy<0?b.y-12:b.cy-3,
           cr=dx?[dx>0?b.x+b.w:fx+8,b.cy,dx>0?fx-1:b.x-1,b.cy+1]:[b.cx,dy>0?b.y+b.h:fy+8,b.cx+1,dy>0?fy-1:b.y-1];
         if(!all(fx-1,fy-1,fx+8,fy+8)||!all(...cr))continue;
         carve({x:fx,y:fy,w:8,h:8});carve({x:cr[0],y:cr[1],w:cr[2]-cr[0]+1,h:cr[3]-cr[1]+1});
         this.rooms.push({x:fx,y:fy,w:8,h:8,cx:fx+4,cy:fy+4,type:'final'});break}}
   }
-  wall(tx,ty){return tx<0||ty<0||tx>=MW||ty>=MH||this.g[ty][tx]===1||this.gt[ty][tx]>.4} // raised gates block movement, sight and shots like walls
-  /** Line-of-sight scan (radius 8 tiles): marks visible tiles and records them as explored */
+  wall(tx,ty){return tx<0||ty<0||tx>=MW||ty>=MH||this.g[ty][tx]===1||this.gt[ty][tx]>.4}
   look(px,py){const tx=px/T|0,ty=py/T|0,rad=7;
     for(const r of this.vis)r.fill(0);
     for(let j=-rad;j<=rad;j++)for(let i=-rad;i<=rad;i++){const x=tx+i,y=ty+j;
       if(i*i+j*j>rad*rad||x<0||y<0||x>=MW||y>=MH)continue;
       if(this.los(tx,ty,x,y)){this.vis[y][x]=1;this.ex[y][x]=1}}
-    // walls bordering a visible floor tile are seen too, so room outlines do not break up
     for(let j=-rad;j<=rad;j++)for(let i=-rad;i<=rad;i++){const x=tx+i,y=ty+j;
       if(x<1||y<1||x>=MW-1||y>=MH-1||this.vis[y][x]||!this.wall(x,y))continue;
       for(let b=-1;b<=1;b++)for(let a=-1;a<=1;a++)if(this.vis[y+b][x+a]&&!this.wall(x+a,y+b)){this.vis[y][x]=1;this.ex[y][x]=1}}}
-  /** Bresenham walk between two tiles; any wall strictly between them blocks sight */
+  ahead(px,py){const tx=px/T|0,ty=py/T|0,rad=12;
+    for(let j=-rad;j<=rad;j++)for(let i=-rad;i<=rad;i++){const x=tx+i,y=ty+j;
+      if(i*i+j*j<=rad*rad&&x>=0&&y>=0&&x<MW&&y<MH)this.pg[y][x]=1}}
   los(x0,y0,x1,y1){const dx=Math.abs(x1-x0),dy=Math.abs(y1-y0),sx=x0<x1?1:-1,sy=y0<y1?1:-1;let e=dx-dy;
     while(x0!==x1||y0!==y1){const e2=2*e;if(e2>-dy){e-=dy;x0+=sx}if(e2<dx){e+=dx;y0+=sy}
       if((x0!==x1||y0!==y1)&&this.wall(x0,y0))return false}
     return true}
 }
 
-/* ===== Player ===== */
 class Player{
   constructor(x,y){this.x=x;this.y=y;this.r=10;this.mhp=100;this.hp=100;this.atk=12;this.sp=165;this.as=1;
     this.xp=0;this.lvl=1;this.gold=0;this.pot=1;this.wt=0;this.at=0;
@@ -169,9 +162,8 @@ class Player{
   }
 }
 
-/* ===== Enemies ===== */
 class Enemy{
-  constructor(type,x,y,fl){const d=ED[type],bs=type==='boss',bi=bs?Math.min(2,((fl/10-1)/3)|0):0,bk=bs?3**(fl/10-1-3*bi):1,s=bs?bk*[1.9,7.6,19][bi]:1+.4*(fl-1); // regular enemies scale with depth; each boss encounter is exactly 3x the last
+  constructor(type,x,y,fl){const d=ED[type],bs=type==='boss',bi=bs?Math.min(2,((fl/10-1)/3)|0):0,bk=bs?3**(fl/10-1-3*bi):1,s=bs?bk*[1.9,7.6,19][bi]:1+.4*(fl-1);
     this.bi=bi;this.dm=bs?bk*[1.4,2.5,4][bi]:1+.15*(fl-1);this.ls=bs?s:1+.2*(fl-1);this.rad=[110,135,120][bi];this.type=type;this.x=x;this.y=y;this.r=d.r;this.sp=d.sp*(1+.02*fl);
     this.hp=this.mhp=Math.round(d.hp*(1+bi*.4)*s);this.s=s;this.vx=0;this.vy=0;this.cd=rr(.5,1.5);this.fl=0;this.aw=false;this.st=0;this.tm=0;this.ph=R()*9}
   hit(d,a,crit,G){
@@ -186,30 +178,30 @@ class Enemy{
   update(dt,G){
     const p=G.p,dx=p.x-this.x,dy=p.y-this.y,d=Math.hypot(dx,dy)||1,ux=dx/d,uy=dy/d;
     this.fl-=dt;this.cd-=dt;G.move(this,this.vx*dt,this.vy*dt);const f=Math.max(0,1-9*dt);this.vx*=f;this.vy*=f;
-    const seen=G.d.los(this.x/T|0,this.y/T|0,p.x/T|0,p.y/T|0); // enemies need line of sight to notice or shoot you
-    if(!this.aw){if(this.type!=='boss'&&d<290&&seen)this.aw=true;else return} // the boss only wakes when its room seals
+    const seen=G.d.los(this.x/T|0,this.y/T|0,p.x/T|0,p.y/T|0);
+    if(!this.aw){if(this.type!=='boss'&&d<290&&seen)this.aw=true;else return}
     let mx=0,my=0;
     if(this.type==='skel'){mx=ux;my=uy;if(d<26&&this.cd<=0){p.hurt(10*this.dm,G);this.cd=1}}
     else if(this.type==='cult'||this.type==='wraith'){
       if(d<170&&seen){mx=-ux;my=-uy}else if(d>250||!seen){mx=ux;my=uy}else{mx=-uy*Math.sin(G.t+this.ph);my=ux*Math.sin(G.t+this.ph)}
       if(this.cd<=0&&d<420&&seen){this.cd=this.type==='wraith'?2.6:1.9;G.snd.shoot();
         for(const o of this.type==='wraith'?[-.35,0,.35]:[0]){const a=Math.atan2(uy,ux)+o;G.shots.push({x:this.x,y:this.y,vx:Math.cos(a)*200,vy:Math.sin(a)*200,l:4,d:7*this.dm})}}}
-    else if(this.type==='boss'){ // the Ember Lord: stomps when close, fires bullet rings, enrages below half HP
+    else if(this.type==='boss'){
       const en=this.hp<this.mhp/2?1.4:1;
       if(this.st===0){mx=ux*en;my=uy*en;this.bc=(this.bc||2)-dt;
-        if(this.bi===2&&(this.bl=(this.bl||3)-dt)<=0){this.bl=3.4/en;G.burst(this.x,this.y-30,20,'#c070ff',260,.6,0);const a=rr(0,TAU),r=this.rm; // Void Sovereign blinks next to you
+        if(this.bi===2&&(this.bl=(this.bl||3)-dt)<=0){this.bl=3.4/en;G.burst(this.x,this.y-30,20,'#c070ff',260,.6,0);const a=rr(0,TAU),r=this.rm;
           this.x=Math.max((r.x+1.5)*T,Math.min((r.x+r.w-1.5)*T,p.x+Math.cos(a)*120));this.y=Math.max((r.y+1.5)*T,Math.min((r.y+r.h-1.5)*T,p.y+Math.sin(a)*120));G.burst(this.x,this.y-30,20,'#c070ff',260,.6,0);G.snd.tone(500,'sine',.3,.12,-300)}
         if(d<90&&this.cd<=0){this.st=1;this.tm=.8}
-        else if(this.bc<=0){this.bc=(this.bi===1?1.9:2.6)/en;G.snd.shoot();const n=this.bi===1?5:this.bi===2?18:14; // Ember: ring, Frost: aimed fan, Void: dense ring
+        else if(this.bc<=0){this.bc=(this.bi===1?1.9:2.6)/en;G.snd.shoot();const n=this.bi===1?5:this.bi===2?18:14;
           for(let i=0;i<n;i++){const a=this.bi===1?Math.atan2(uy,ux)+(i-2)*.22:i/n*TAU+G.t,v=this.bi===1?230:170;G.shots.push({x:this.x,y:this.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:4,d:8*this.dm})}}}
       else if(this.st===1){this.tm-=dt;if(this.tm<=0){this.st=2;this.tm=.6;G.snd.boom();G.shake=16;G.burst(this.x,this.y,30,'#ff8a30',340,.7,200);if(Math.hypot(p.x-this.x,p.y-this.y)<this.rad)p.hurt(25*this.dm,G)}}
       else{this.tm-=dt;if(this.tm<=0){this.st=0;this.cd=1.4}}}
-    else if(this.type==='bat'){const w=Math.sin(G.t*7+this.ph);mx=ux-uy*w*1.1;my=uy+ux*w*1.1; // erratic swooping flight
+    else if(this.type==='bat'){const w=Math.sin(G.t*7+this.ph);mx=ux-uy*w*1.1;my=uy+ux*w*1.1;
       if(d<24&&this.cd<=0){p.hurt(6*this.dm,G);this.cd=.9}}
-    else if(this.type==='bomber'){ // rushes you, lights a fuse, then explodes
+    else if(this.type==='bomber'){
       if(this.st===0){mx=ux;my=uy;if(d<50){this.st=1;this.tm=.7;G.snd.tone(900,'square',.1,.1)}}
       else{this.tm-=dt;if(this.tm<=0){G.snd.boom();G.shake=12;G.burst(this.x,this.y-10,24,'#ff8a30',320,.6,200);if(Math.hypot(p.x-this.x,p.y-this.y)<76)p.hurt(20*this.dm,G);this.hp=0}}}
-    else{ // golem: chase, telegraph, slam
+    else{
       if(this.st===0){mx=ux;my=uy;if(d<72&&this.cd<=0){this.st=1;this.tm=.9}}
       else if(this.st===1){this.tm-=dt;if(this.tm<=0){this.st=2;this.tm=.7;G.snd.boom();G.shake=14;G.burst(this.x,this.y,26,'#8a7a60',320,.6,200);
         if(Math.hypot(p.x-this.x,p.y-this.y)<84)p.hurt(20*this.dm,G)}}
@@ -254,7 +246,6 @@ class Enemy{
   }
 }
 
-/* ===== Game ===== */
 class Game{
   constructor(){
     this.cv=document.getElementById('cv');this.c=this.cv.getContext('2d');this.fog=document.createElement('canvas');this.fc=this.fog.getContext('2d');
@@ -276,20 +267,16 @@ class Game{
     requestAnimationFrame(t=>this.frame(t));
   }
   resize(){this.W=this.cv.width=this.fog.width=document.body.clientWidth;this.H=this.cv.height=this.fog.height=document.body.clientHeight}
-  /* --- overlays --- */
   ui(h,f){const o=document.getElementById('ov');document.getElementById('bx').innerHTML=h||'';o.className=h?(f?'f':''):'h'}
-  /** Tile window covering the whole screen plus a margin, so the world is already built when it scrolls into view */
   view(){const W=this.W,H=this.H,uT=H/2/CF,dT=uT*CA-SA,rT=Math.max(-20*T,dT<-.08?uT*CD/dT:-30*T),uB=-H/2/CF,rB=uB*CD/(uB*CA-SA),hx=(CD-rT*CA)*(W/2)/CF,m=5;
     return[Math.max(0,((this.cx-hx)/T|0)-m),Math.min(MW-1,((this.cx+hx)/T|0)+m),Math.max(0,((this.cy+rT)/T|0)-m),Math.min(MH-1,((this.cy+rB)/T|0)+m)]}
-  /* --- saves: stored in localStorage (falls back to memory if the browser blocks it) --- */
   saves(){try{return JSON.parse(localStorage.getItem('ember_saves'))||[]}catch(e){return this.mem||[]}}
   put(a){this.mem=a;try{localStorage.setItem('ember_saves',JSON.stringify(a))}catch(e){}}
-  /** Autosave after every floor and on Save and Exit: player stats + run counters (the floor itself is regenerated on load) */
   store(){if(!this.sid||!this.p)return;const p=this.p,q={};
     for(const k of ['mhp','hp','atk','sp','as','xp','lvl','xpn','gold','pot','wt','at','rel'])q[k]=p[k];
     this.put([{id:this.sid,t:Date.now(),floor:this.floor,kills:this.kills,goldTotal:this.goldTotal,visits:this.visits||0,p:q},...this.saves().filter(s=>s.id!==this.sid)].slice(0,8))}
-  load(s){this.sid=s.id;this.floor=s.floor;this.kills=s.kills;this.goldTotal=s.goldTotal;this.visits=s.visits-(this.floor%10&&this.floor%7===0?1:0); // a market floor re-counts its visit when regenerated
-    const p=this.p=Object.assign(new Player(0,0),JSON.parse(JSON.stringify(s.p)));p.hp=Math.max(1,p.hp-Math.round(p.mhp*.25)); // gen() heals a quarter on arrival, so this restores the exact saved HP
+  load(s){this.sid=s.id;this.floor=s.floor;this.kills=s.kills;this.goldTotal=s.goldTotal;this.visits=s.visits-(this.floor%10&&this.floor%7===0?1:0);
+    const p=this.p=Object.assign(new Player(0,0),JSON.parse(JSON.stringify(s.p)));p.hp=Math.max(1,p.hp-Math.round(p.mhp*.25));
     this.gen();this.state='play';this.ui('');this.fade=1}
   showTitle(){this.state='title';this.sid=0;this.newRun(true);this.fade=0;this.titleUi()}
   titleUi(){this.ui('<h1 class="big">Depths of Ember</h1><p class="sub">Descend through the torchlit crypt. Slay, loot and grow stronger.</p><div class="menu"><button id="go">Play</button><button id="ct">Controls</button><button id="sv">Saves</button><button id="st">Settings</button></div>',1);
@@ -318,10 +305,9 @@ class Game{
     this.ui('<h2>Level '+p.lvl+'</h2><p>Choose an upgrade (or press 1-3)</p>'+this.ch.map((u,i)=>'<button class="cd" data-i="'+i+'"><b>'+u[0]+'</b><br><small>'+u[1]+'</small></button>').join(''));
     document.querySelectorAll('.cd').forEach(b=>b.onclick=()=>this.pick(+b.dataset.i))}
   pick(i){if(!this.ch[i])return;this.ch[i][2](this.p);this.snd.pick();this.state='play';this.ui('')}
-  /* --- world setup --- */
   newRun(bg){this.sid=bg?0:Date.now();this.floor=1;this.kills=0;this.goldTotal=0;this.visits=0;this.p=null;this.gen();this.p.xpn=36;this.store()}
   gen(){
-    const boss=this.floor%10===0,mk=!boss&&this.floor%7===0,old=this.p;let d;this.boss=boss;this.mk=mk; // every 7th floor is the market, every 10th has a boss
+    const boss=this.floor%10===0,mk=!boss&&this.floor%7===0,old=this.p;let d;this.boss=boss;this.mk=mk;
     for(let i=0;i<80;i++){d=new Dungeon(mk,boss);if(!boss||d.rooms.some(r=>r.type==='final'))break}
     this.d=d;const st=d.rooms[0];
     this.p=new Player((mk?st.x+2.5:st.cx+.5)*T,(st.cy+.5)*T);
@@ -336,42 +322,32 @@ class Game{
       if(r.type==='combat'||r.type==='treasure')for(let i=ri(0,2);i>0;i--){const s=spot(r);this.crates.push({x:s.x,y:s.y,hp:1})}});
     const ex=d.rooms.find(r=>r.type==='exit'||r.type==='final')||{cx:30,cy:21};this.stairs={x:(ex.cx+1)*T,y:(ex.cy+1)*T};
     this.stalls=[];this.keeper=null;
-    if(mk){const v=this.visits=(this.visits||0)+1,r=d.rooms[0]; // later visits: rarer and pricier stock
+    if(mk){const v=this.visits=(this.visits||0)+1,r=d.rooms[0];
       this.stock(v,1+.4*(v-1)).forEach((it,i)=>this.stalls.push({x:(r.x+3.5+i*3.4)*T,y:(r.y+4)*T,it,sold:0}));this.keeper={x:(r.x+r.w/2)*T,y:(r.y+1.8)*T}}
-    this.cam.x=this.p.x;this.cam.y=this.p.y;d.look(this.p.x,this.p.y);
-    if(this.p.xpn)this.store(); // autosave after every floor
+    this.cam.x=this.p.x;this.cam.y=this.p.y;d.look(this.p.x,this.p.y);d.ahead(this.p.x,this.p.y);
+    if(this.p.xpn)this.store();
   }
-  /* --- helpers --- */
   float(x,y,t,c){this.floats.push({x,y,t,c,l:.9})}
   burst(x,y,n,c,s,l,g){for(let i=0;i<n;i++)this.parts.push(new Particle(x,y,rr(0,TAU),rr(s*.2,s),c,rr(l*.5,l),g,rr(2,4.5)))}
   shadow(c,x,y,r){c.fillStyle='rgba(0,0,0,.4)';c.beginPath();c.ellipse(x,y,r,r*.75,0,0,TAU);c.fill()}
-  /** Perspective projection of a world point (x,y ground, z height) through the pitched camera centred on cam */
   proj(x,y,z){const rx=x-this.cx,ry=y-this.cy,s=CF/(CD-ry*CA-z*SA);return{x:this.ox+rx*s,y:this.oy-(-ry*SA+z*CA)*s,s}}
-  /** Inverse projection: screen point -> point on the ground plane (used for mouse aiming) */
   ground(mx,my){const u=(this.H/2-my)/CF,ry=u*CD/(u*CA-SA);return{x:this.cx+(mx-this.W/2)*(CD-ry*CA)/CF,y:this.cy+ry}}
-  /** Draw a 2D sprite as a camera-facing billboard standing at a world position (sq squashes ground-flat art) */
-  bb(e,fn,sq=1){const c=this.c,q=this.proj(e.x,e.y,e.z||0);if(q.s<=0||q.s>2.5)return; // skip anything at or behind the camera plane (projection blows up there)
+  bb(e,fn,sq=1){const c=this.c,q=this.proj(e.x,e.y,e.z||0);if(q.s<=0||q.s>2.5)return;
     c.save();c.translate(q.x,q.y);c.scale(q.s,q.s*sq);c.translate(-e.x,-e.y);fn();c.restore()}
-  /** Add a projected polygon to the current path, normalised so overlapping polygons union under nonzero fill */
   path(c,a){let s=0;for(let i=0;i<a.length;i++){const u=a[i],v=a[(i+1)%a.length];s+=u.x*v.y-v.x*u.y}if(s<0)a=a.slice().reverse();a.forEach((q,i)=>i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y));c.closePath()}
-  /** Move entity with axis-separated tile collision */
   move(e,dx,dy){const r=e.r,d=this.d,ok=(x,y)=>!(d.wall((x-r)/T|0,(y-r*.6)/T|0)||d.wall((x+r)/T|0,(y-r*.6)/T|0)||d.wall((x-r)/T|0,(y+r*.6)/T|0)||d.wall((x+r)/T|0,(y+r*.6)/T|0));
     if(ok(e.x+dx,e.y))e.x+=dx;if(ok(e.x,e.y+dy))e.y+=dy}
   usePotion(){const p=this.p;if(p.pot>0&&p.hp<p.mhp){p.pot--;const h=Math.round(p.mhp*.45);p.hp=Math.min(p.mhp,p.hp+h);this.snd.pick();this.float(p.x,p.y-40,'+'+h,'#50ff80');this.burst(p.x,p.y-14,12,'#50ff80',100,.7,-80)}}
-  /** Doorways of a room: the floor tiles just outside its walls (gates rise here) */
   ring(r){const d=this.d,o=[];for(let y=r.y-1;y<=r.y+r.h;y++)for(let x=r.x-1;x<=r.x+r.w;x++){const sx=x<r.x||x>=r.x+r.w,sy=y<r.y||y>=r.y+r.h;if((sx||sy)&&!(sx&&sy)&&d.g[y]&&d.g[y][x]===0)o.push({x,y})}return o}
-  /** Market stock: six offers (always one potion); each visit rolls rarer, pricier items. Relics never repeat. */
   stock(v,m){const p=this.p,pool=[...RL.filter(r=>!p.rel[r.id]).map(r=>({...r})),{id:'wt',n:'Forged Blade',r:2,d:'Weapon tier +1.'},{id:'at',n:'Runed Plate',r:2,d:'Armor tier +1 (+10 Max HP).'}]
       .filter(r=>!(r.id==='wt'&&p.wt>=MT)&&!(r.id==='at'&&p.at>=MT)),out=[{id:'pot',n:'Health Potion',r:0,d:'Restores 45% HP when used.',cost:Math.round(35*m/5)*5}];
     while(out.length<6&&pool.length){const t=Math.min(3,ri(0,1)+v-1);pool.sort((a,b)=>Math.abs(a.r-t)-Math.abs(b.r-t)+rr(-.4,.4));const it=pool.shift();it.cost=Math.round(PB[it.r]*(it.r===1||it.r===2?1.2:1)*m/5)*5;out.push(it)}
     return out}
-  /** Buy the offer at the stall you stand next to (F) */
   buy(){const p=this.p,s=this.stalls.find(q=>!q.sold&&Math.hypot(q.x-p.x,q.y-p.y)<46);if(!s)return;const i=s.it;
     if(p.gold<i.cost){this.float(p.x,p.y-40,'Not enough gold','#ff7070');this.snd.hurt();return}
     p.gold-=i.cost;s.sold=1;this.snd.pick();
     if(i.id==='pot')p.pot++;else if(i.id==='wt')p.wt++;else if(i.id==='at'){p.at++;p.mhp+=10;p.hp+=10}else{p.rel[i.id]=1;if(i.f)i.f(p)}
     this.float(p.x,p.y-40,i.n,RC[i.r]);this.burst(s.x,s.y-30,14,RC[i.r],200,.7,0)}
-  /** Toggle the inventory (E) */
   inv(){if(this.state==='inv'){this.state='play';this.ui('');return}this.click=false;this.state='inv';this.showInv()}
   showInv(){const p=this.p,rl=RL.filter(r=>p.rel[r.id]);
     const wd='Weapon tier '+p.wt+': damage x'+(1+.25*p.wt).toFixed(2)+' (+'+25*p.wt+'%), slash reach +'+3*p.wt+', '+TN[p.wt]+' slash trail. '+(p.wt<MT?'Every tier adds +25% damage, +3 reach and a new trail colour.':'Maximum tier.'),
@@ -385,21 +361,18 @@ class Game{
       +'</div></div><div id="tip">Hover the weapon, armor or a relic for details.</div><button id="cl">Close (E)</button>');
     document.querySelectorAll('[data-t]').forEach(e=>e.onmouseenter=()=>document.getElementById('tip').textContent=e.dataset.t);
     document.getElementById('dp').onclick=()=>{this.usePotion();this.showInv()};document.getElementById('cl').onclick=()=>this.inv()}
-  /** Draw the tiny hero (with current weapon and armor) into the inventory canvas */
   invDraw(){const cv=document.getElementById('hc');if(!cv)return;const x=cv.getContext('2d'),p=this.p,sa=p.aim,sm=p.mv;
     x.setTransform(1,0,0,1,0,0);x.clearRect(0,0,cv.width,cv.height);x.setTransform(2.6,0,0,2.6,0,0);x.translate(50/2.6-p.x,112/2.6-p.y);
     p.aim=-.2;p.mv=false;p.draw(x,this);p.aim=sa;p.mv=sm}
-  /** Cutscene: the hero walks round to the head of the stairs if needed, descends, fades out, then the next floor loads */
   descend(dt){const p=this.p,s=this.stairs;this.t+=dt;p.mv=true;p.swing=0;
-    if(this.wp.length){ // stage 1: walk around the shaft to its north end (the head of the steps)
+    if(this.wp.length){
       const g=this.wp[0],dx=g.x-p.x,dy=g.y-p.y,d=Math.hypot(dx,dy),st=175*dt;p.aim=Math.atan2(dy,dx);
       if(d<=st){p.x=g.x;p.y=g.y;this.wp.shift()}else{p.x+=dx/d*st;p.y+=dy/d*st}}
-    else{ // stage 2: walk south down the steps, sinking below the rim, then fade out
+    else{
       const t=this.cs+=dt;p.aim=Math.PI/2;p.x+=(s.x-p.x)*Math.min(1,dt*10);p.y=s.y-40+Math.min(1,t/1.4)*78;p.z=-Math.max(0,Math.min(72,(p.y-(s.y-32))*1.12));
       this.fade=Math.max(0,Math.min(1,(t-.9)/.5));
       if(t>=1.5){this.floor++;this.gen();this.state='play';this.fade=1;this.snd.lvl()}}
     if((this.stT=(this.stT||0)-dt)<=0){this.stT=.28;this.snd.step()}}
-  /** Directional melee slash: arc hit test, knockback, crit chance */
   slash(){const p=this.p;p.swing=.2;p.sa=p.aim;p.cd=.4/p.as;this.snd.swing();const rng=64+p.wt*3,crit=R()<(p.rel.crit?.3:.15);
     p.x+=Math.cos(p.aim)*3;p.y+=Math.sin(p.aim)*3;
     const inArc=(o,rad)=>{const dx=o.x-p.x,dy=o.y-14-p.y,d=Math.hypot(dx,dy);if(d>rng+rad)return false;let da=Math.abs(Math.atan2(dy,dx)-p.sa);da=Math.min(da,TAU-da);return da<1.2||d<rad+16};
@@ -407,11 +380,10 @@ class Game{
     for(const c of this.crates)if(c.hp>0&&inArc(c,14)){c.hp=0;this.snd.hit();this.burst(c.x,c.y-10,14,'#8a5a2a',220,.6,400);
       if(R()<.5)this.orbs.push({x:c.x,y:c.y,vx:0,vy:-60,k:'g',v:ri(1,3)});if(R()<.1)this.items.push({x:c.x,y:c.y,k:'potion'})}
     this.en=this.en.filter(e=>e.hp>0);this.crates=this.crates.filter(c=>c.hp>0)}
-  /* --- update --- */
   update(dt){
     const p=this.p,d=this.d;this.t+=dt;this.fade=Math.max(0,(this.fade||0)-dt*1.6);p.update(dt,this);if(this.state!=='play')return;
     this.en.forEach(e=>e.update(dt,this));this.en=this.en.filter(e=>e.hp>0);
-    for(const r of d.rooms){if(!r.gates)continue; // rooms with enemies seal their doorways with gates until cleared
+    for(const r of d.rooms){if(!r.gates)continue;
       const alive=this.en.some(e=>e.rm===r),px=p.x/T|0,py=p.y/T|0;
       if(!r.on&&!r.done&&alive&&px>r.x&&px<r.x+r.w-1&&py>r.y&&py<r.y+r.h-1){r.on=true;this.snd.boom();this.shake=Math.max(this.shake,8);this.float(p.x,p.y-50,'SEALED','#ff6060');this.en.forEach(e=>{if(e.rm===r)e.aw=true})}
       if(r.on&&!alive){r.on=false;r.done=true;this.snd.pick();this.float(p.x,p.y-50,'GATES OPEN','#80ff90')}
@@ -437,46 +409,43 @@ class Game{
       this.burst(p.x,p.y-14,12,'#ffe080',160,.6,0)}
     this.items=this.items.filter(i=>!i.dead);
     {const s=this.stairs,dx=p.x-s.x,dy=p.y-s.y;if(Math.abs(dx)<52&&Math.abs(dy)<56){this.state='descend';this.cs=0;this.click=false;p.dash=0;
-      const sg=dx<0?-1:1,E={x:s.x,y:s.y-40};this.wp=[]; // the steps always start on the north side; approach from elsewhere means walking round
+      const sg=dx<0?-1:1,E={x:s.x,y:s.y-40};this.wp=[];
       if(dy>=-39){if(dy>34)this.wp.push({x:s.x+sg*52,y:s.y+48});this.wp.push({x:s.x+sg*52,y:s.y-48})}
       this.wp.push(E);this.snd.tone(320,'triangle',1.2,.12,-220)}}
-    // line-of-sight visibility and exploration
-    d.look(p.x,p.y);
-    // ambient embers around the player
+    d.look(p.x,p.y);d.ahead(p.x,p.y);
     if(R()<.5)this.parts.push(new Particle(p.x+rr(-260,260),p.y+rr(-160,200),-1.6,rr(15,40),R()<.5?'#ff9a30':'#ffd070',rr(1,2.2),-10,2));
     this.parts=this.parts.filter(q=>{q.update(dt);return q.l>0});
     this.floats.forEach(f=>{f.l-=dt;f.y-=40*dt});this.floats=this.floats.filter(f=>f.l>0);
     this.shake=Math.max(0,this.shake-40*dt);
   }
-  /* --- render --- */
   render(){
     const c=this.c,W=this.W,H=this.H,p=this.p,d=this.d,cam=this.cam;
     cam.x+=(p.x-cam.x)*.12;cam.y+=(p.y-cam.y)*.12;
-    this.cx=cam.x;this.cy=cam.y;this.ox=W/2+rr(-1,1)*this.shake;this.oy=H/2+rr(-1,1)*this.shake; // camera target + screen shake
+    this.cx=cam.x;this.cy=cam.y;this.ox=W/2+rr(-1,1)*this.shake;this.oy=H/2+rr(-1,1)*this.shake;
     c.globalAlpha=1;c.fillStyle='#050408';c.fillRect(0,0,W,H);
-    const [tx0,tx1,ty0,ty1]=this.view(); // tile window = whole screen + a 3-tile margin, so the world is built before it scrolls into view
+    const [tx0,tx1,ty0,ty1]=this.view();
     const L=[];c.lineWidth=1;
-    const kk=Math.min(1,(this.rdt||.016)*7); // light fades smoothly per tile, so nothing pops in or out
-    for(let y=ty0;y<=ty1;y++)for(let x=tx0;x<=tx1;x++){const t=d.vis[y][x]?1:d.ex[y][x]?.16:0;d.lt[y][x]+=(t-d.lt[y][x])*kk}
+    const kk=Math.min(1,(this.rdt||.016)*7);
+    for(let y=ty0;y<=ty1;y++)for(let x=tx0;x<=tx1;x++){const t=d.vis[y][x]?1:(d.ex[y][x]||d.pg[y][x])?.16:0;d.lt[y][x]+=(t-d.lt[y][x])*kk}
     const P=(x,y,z)=>this.proj(x,y,z);
     for(let y=ty0;y<=ty1;y++)for(let x=tx0;x<=tx1;x++){const h=((x*374761393+y*668265263)>>>0)%100,X=x*T,Y=y*T;
-      if(d.g[y][x]===0){ // floor tile: perspective-projected quad with stone texture
-        const lt=d.lt[y][x];if(lt<.03)continue; // never seen: not drawn at all
+      if(d.g[y][x]===0){
+        const lt=d.lt[y][x];if(lt<.03)continue;
         const a=[P(X,Y,0),P(X+T,Y,0),P(X+T,Y+T,0),P(X,Y+T,0)];
         c.fillStyle='hsl(28,'+(10+h%8)+'%,'+(17+h%7)+'%)';c.beginPath();this.path(c,a);c.fill();
         c.strokeStyle='rgba(0,0,0,.35)';c.stroke();
         c.fillStyle='rgba(255,255,255,.05)';c.beginPath();this.path(c,[P(X+3,Y+3,0),P(X+T-3,Y+3,0),P(X+T-3,Y+7,0),P(X+3,Y+7,0)]);c.fill();
         if(h<18){const u=P(X+h,Y+6,0),v=P(X+h+9,Y+24,0);c.strokeStyle='rgba(0,0,0,.4)';c.beginPath();c.moveTo(u.x,u.y);c.lineTo(v.x,v.y);c.stroke()}
         if(lt<.98){c.fillStyle='rgba(4,3,6,'+(1-lt)+')';c.beginPath();this.path(c,a);c.fill()}
-        if(d.gt[y][x]>.02){const gh=d.gt[y][x]*(WH-4);L.push({y:Y,f:()=>{ // black gate jutting out of the floor
+        if(d.gt[y][x]>.02){const gh=d.gt[y][x]*(WH-4);L.push({y:Y,f:()=>{
           const fc=(a,col)=>{c.globalAlpha=Math.min(1,lt*1.3);c.fillStyle=col;c.strokeStyle='#4a2a2a';c.beginPath();this.path(c,a);c.fill();c.stroke();c.globalAlpha=1};
           fc([P(X,Y+T,0),P(X+T,Y+T,0),P(X+T,Y+T,gh),P(X,Y+T,gh)],'#0a090c');
           if(this.cx>X+T)fc([P(X+T,Y,0),P(X+T,Y+T,0),P(X+T,Y+T,gh),P(X+T,Y,gh)],'#070609');
           if(this.cx<X)fc([P(X,Y,0),P(X,Y+T,0),P(X,Y+T,gh),P(X,Y,gh)],'#070609');
           fc([P(X,Y,gh),P(X+T,Y,gh),P(X+T,Y+T,gh),P(X,Y+T,gh)],'#17141b');
           c.globalAlpha=Math.min(1,lt*1.3);c.strokeStyle='rgba(220,70,40,.55)';for(let k=1;k<4;k++){const u=P(X+T*k/4,Y+T,0),v=P(X+T*k/4,Y+T,gh);c.beginPath();c.moveTo(u.x,u.y);c.lineTo(v.x,v.y);c.stroke()}c.globalAlpha=1}})}}
-      else if(d.lt[y][x]>.03&&[-1,0,1].some(j=>[-1,0,1].some(i=>!d.wall(x+i,y+j)))){ // wall: a real 3D box (south face, side faces, top)
-        const hh=WH,lt=d.lt[y][x],occ=Y>p.y-T*.3?Math.max(0,1-Math.hypot((X+T/2-p.x)/(T*2.2),(Y+T*.5-p.y-T*1.1)/(T*2.2))):0,wa=1-.72*occ; // walls right in front of the player turn see-through
+      else if(d.lt[y][x]>.03&&[-1,0,1].some(j=>[-1,0,1].some(i=>!d.wall(x+i,y+j)))){
+        const hh=WH,lt=d.lt[y][x],occ=Y>p.y-T*.3?Math.max(0,1-Math.hypot((X+T/2-p.x)/(T*2.2),(Y+T*.5-p.y-T*1.1)/(T*2.2))):0,wa=1-.72*occ;
         L.push({y:Y,f:()=>{
           const face=(a,col)=>{c.globalAlpha=wa;c.fillStyle=col;c.strokeStyle=col;c.beginPath();this.path(c,a);c.fill();c.stroke();if(lt<.98){c.fillStyle='rgba(4,3,6,'+(1-lt)+')';c.fill()}c.globalAlpha=1};
           if(!d.wall(x,y+1)){face([P(X,Y+T,0),P(X+T,Y+T,0),P(X+T,Y+T,hh),P(X,Y+T,hh)],'hsl(25,18%,'+(25+h%4)+'%)');
@@ -484,26 +453,25 @@ class Game{
           if(this.cx>X+T&&!d.wall(x+1,y))face([P(X+T,Y,0),P(X+T,Y+T,0),P(X+T,Y+T,hh),P(X+T,Y,hh)],'hsl(25,16%,20%)');
           if(this.cx<X&&!d.wall(x-1,y))face([P(X,Y,0),P(X,Y+T,0),P(X,Y+T,hh),P(X,Y,hh)],'hsl(25,16%,17%)');
           face([P(X,Y,hh),P(X+T,Y,hh),P(X+T,Y+T,hh),P(X,Y+T,hh)],'hsl(25,12%,'+(36+h%6)+'%)')}})}}
-    // stairs & chests, crates, items, entities as depth-sorted drawables
     const sp=this.stairs,slt=d.lt[Math.min(MH-1,sp.y/T|0)][Math.min(MW-1,sp.x/T|0)];
-    if(slt>.03&&sp.y/T>ty0&&sp.y/T<ty1-1&&sp.x/T>tx0&&sp.x/T<tx1)L.push({y:sp.y-400,f:()=>{ // 3D staircase: a stone-framed shaft whose steps really descend below floor level
+    if(slt>.03&&sp.y/T>ty0&&sp.y/T<ty1-1&&sp.x/T>tx0&&sp.x/T<tx1)L.push({y:sp.y-400,f:()=>{
       const x0=sp.x-30,x1=sp.x+30,y0=sp.y-32,y1=sp.y+32,poly=(a,col)=>{c.fillStyle=col;c.beginPath();this.path(c,a);c.fill()};
-      poly([P(x0-7,y0-7,0),P(x1+7,y0-7,0),P(x1+7,y1+7,0),P(x0-7,y1+7,0)],'#3b3027'); // stone frame
-      const mouth=[P(x0,y0,0),P(x1,y0,0),P(x1,y1,0),P(x0,y1,0)];poly(mouth,'#060407'); // shaft opening
-      c.save();c.beginPath();this.path(c,mouth);c.clip(); // the floor rim hides everything below it
+      poly([P(x0-7,y0-7,0),P(x1+7,y0-7,0),P(x1+7,y1+7,0),P(x0-7,y1+7,0)],'#3b3027');
+      const mouth=[P(x0,y0,0),P(x1,y0,0),P(x1,y1,0),P(x0,y1,0)];poly(mouth,'#060407');
+      c.save();c.beginPath();this.path(c,mouth);c.clip();
       if(this.cx>x0)poly([P(x0,y0,0),P(x0,y1,0),P(x0,y1,-72),P(x0,y0,-12)],'#2a1f17');
       if(this.cx<x1)poly([P(x1,y0,0),P(x1,y1,0),P(x1,y1,-72),P(x1,y0,-12)],'#211812');
-      for(let i=0;i<6;i++){const ya=y0+i*10.67,yb=ya+10.67,z=-12*(i+1),sh=27-i*4; // six steps descending southward: the first step is at the north end, risers face the camera
+      for(let i=0;i<6;i++){const ya=y0+i*10.67,yb=ya+10.67,z=-12*(i+1),sh=27-i*4;
         poly([P(x0,ya,z+12),P(x1,ya,z+12),P(x1,ya,z),P(x0,ya,z)],'hsl(28,14%,'+(sh-6)+'%)');
         poly([P(x0,ya,z),P(x1,ya,z),P(x1,yb,z),P(x0,yb,z)],'hsl(28,14%,'+sh+'%)');
         const u=P(x0,ya,z),v=P(x1,ya,z);c.strokeStyle='rgba(255,215,150,.25)';c.beginPath();c.moveTo(u.x,u.y);c.lineTo(v.x,v.y);c.stroke()}
-      poly(mouth,'rgba(255,150,60,'+(.07+.03*Math.sin(this.t*4))+')');c.restore(); // warm glow from below
+      poly(mouth,'rgba(255,150,60,'+(.07+.03*Math.sin(this.t*4))+')');c.restore();
       c.strokeStyle='rgba(255,215,150,.3)';c.beginPath();this.path(c,mouth);c.stroke();
       if(slt<.98)poly([P(x0-7,y0-7,0),P(x1+7,y0-7,0),P(x1+7,y1+7,0),P(x0-7,y1+7,0)],'rgba(4,3,6,'+(1-slt)+')')}});
     this.chests.forEach(k=>L.push({x:k.x,y:k.y,f:()=>{this.shadow(c,k.x,k.y,16);c.fillStyle='#6a3e18';c.fillRect(k.x-14,k.y-16,28,16);c.fillStyle='#8a5a28';c.fillRect(k.x-14,k.y-(k.o?26:22),28,k.o?6:7);
       c.fillStyle='#ffd040';c.fillRect(k.x-3,k.y-12,6,6);if(k.o){c.fillStyle='#ffe890';c.fillRect(k.x-12,k.y-16,24,3)}}}));
     this.crates.forEach(k=>L.push({x:k.x,y:k.y,f:()=>{this.shadow(c,k.x,k.y,14);c.fillStyle='#7a5226';c.fillRect(k.x-12,k.y-22,24,22);c.strokeStyle='#4a2e12';c.strokeRect(k.x-12,k.y-22,24,22);c.beginPath();c.moveTo(k.x-12,k.y-22);c.lineTo(k.x+12,k.y);c.moveTo(k.x+12,k.y-22);c.lineTo(k.x-12,k.y);c.stroke()}}));
-    this.stalls.forEach(s=>L.push({x:s.x,y:s.y,f:()=>{ // market stall: counter + floating item orb with price tag
+    this.stalls.forEach(s=>L.push({x:s.x,y:s.y,f:()=>{
       this.shadow(c,s.x,s.y,20);c.fillStyle='#5a3a1a';c.fillRect(s.x-18,s.y-18,36,18);c.fillStyle='#7a5226';c.fillRect(s.x-20,s.y-22,40,6);c.textAlign='center';
       if(s.sold){c.fillStyle='#ccc';c.font='bold 10px Georgia';c.fillText('SOLD',s.x,s.y-28);return}
       const i=s.it,b=Math.sin(this.t*3+s.x)*3;c.fillStyle=RC[i.r];c.globalAlpha*=.3;c.beginPath();c.arc(s.x,s.y-36+b,13,0,TAU);c.fill();c.globalAlpha=1;
@@ -514,13 +482,12 @@ class Game{
       if(it.k==='potion'){c.fillStyle='#d02848';c.beginPath();c.arc(it.x,y,7,0,TAU);c.fill();c.fillStyle='#ddd';c.fillRect(it.x-2,y-12,4,6)}
       else if(it.k==='weapon'){c.fillStyle=WC[Math.min(MT,this.p.wt+1)];c.fillRect(it.x-2,y-12,4,18);c.fillStyle='#5a3a1a';c.fillRect(it.x-6,y+4,12,3)}
       else{c.fillStyle=AC[Math.min(MT,this.p.at+1)];c.beginPath();c.moveTo(it.x-9,y-8);c.lineTo(it.x+9,y-8);c.lineTo(it.x+7,y+4);c.lineTo(it.x,y+10);c.lineTo(it.x-7,y+4);c.fill()}}}));
-    this.en.forEach(e=>L.push({x:e.x,y:e.y,en:1,f:()=>e.draw(c,this)})); // enemies only show in line of sight
+    this.en.forEach(e=>L.push({x:e.x,y:e.y,en:1,f:()=>e.draw(c,this)}));
     L.push({x:p.x,y:p.y,z:p.z||0,pl:1,f:()=>p.draw(c,this)});
-    L.sort((a,b)=>(a.sy??a.y)-(b.sy??b.y));L.forEach(o=>{if(o.x===undefined)return o.f(); // walls are projected geometry; everything else is a billboard faded by its tile's light
+    L.sort((a,b)=>(a.sy??a.y)-(b.sy??b.y));L.forEach(o=>{if(o.x===undefined)return o.f();
       const lv=d.lt[Math.min(MH-1,o.y/T|0)][Math.min(MW-1,o.x/T|0)],al=o.pl?1:o.en?(lv-.25)/.75:lv*1.3;
-      if(al<.03)return;c.globalAlpha=Math.min(1,al);if(o.z<0){c.save();c.beginPath();c.rect(0,0,W,this.proj(0,this.stairs.y+32,0).y);c.clip();this.bb(o,o.f,o.sq);c.restore()} // hero sinks below the shaft rim
+      if(al<.03)return;c.globalAlpha=Math.min(1,al);if(o.z<0){c.save();c.beginPath();c.rect(0,0,W,this.proj(0,this.stairs.y+32,0).y);c.clip();this.bb(o,o.f,o.sq);c.restore()}
       else this.bb(o,o.f,o.sq);c.globalAlpha=1});
-    // orbs, slash crescent, projectiles (additive glow)
     c.globalCompositeOperation='lighter';
     this.orbs.forEach(o=>{const q=this.proj(o.x,o.y,8);if(q.s<=0)return;c.fillStyle=o.k==='g'?'#ffcc30':'#40d0ff';c.beginPath();c.arc(q.x,q.y,4*q.s,0,TAU);c.fill();c.globalAlpha=.3;c.beginPath();c.arc(q.x,q.y,9*q.s,0,TAU);c.fill();c.globalAlpha=1});
     this.shots.forEach(s=>{if(d.lt[Math.min(MH-1,s.y/T|0)][Math.min(MW-1,s.x/T|0)]<.5)return;const q=this.proj(s.x,s.y,18);if(q.s<=0)return;c.fillStyle='#d060ff';c.beginPath();c.arc(q.x,q.y,6*q.s,0,TAU);c.fill();c.fillStyle='rgba(220,120,255,.35)';c.beginPath();c.arc(q.x,q.y,13*q.s,0,TAU);c.fill()});
@@ -531,14 +498,11 @@ class Game{
     c.globalCompositeOperation='source-over';
     this.floats.forEach(f=>{const q=this.proj(f.x,f.y,20);c.globalAlpha=Math.min(1,f.l*2);c.font='bold '+Math.round(15*q.s)+'px Georgia';c.textAlign='center';c.lineWidth=3;c.strokeStyle='#000';c.strokeText(f.t,q.x,q.y);c.fillStyle=f.c;c.fillText(f.t,q.x,q.y)});
     c.globalAlpha=1;
-    // warm torch tint
     const pq=this.proj(p.x,p.y,20),px=pq.x,py=pq.y,fl=1+Math.sin(this.t*17)*.04+Math.sin(this.t*7.3)*.05+rr(-.02,.02);
     let g=c.createRadialGradient(px,py,10,px,py,300*fl*pq.s);g.addColorStop(0,'rgba(255,150,50,.22)');g.addColorStop(1,'rgba(255,100,20,0)');
     c.globalCompositeOperation='lighter';c.fillStyle=g;c.fillRect(0,0,W,H);c.globalCompositeOperation='source-over';
-    // torch falloff: the scene darkens smoothly with distance from the flame (no hard cut-off)
     g=c.createRadialGradient(px,py,30,px,py,310*fl*pq.s);g.addColorStop(0,'rgba(3,2,5,0)');g.addColorStop(.5,'rgba(3,2,5,.3)');g.addColorStop(1,'rgba(3,2,5,.9)');
     c.fillStyle=g;c.fillRect(0,0,W,H);
-    // HD-2D style tilt-shift: a blurred, downscaled copy of the scene fades in at the top and bottom edges
     if(!this.bc)this.bc=document.createElement('canvas');
     const bw=W>>2,bh=H>>2;if(this.bc.width!==bw)this.bc.width=bw;if(this.bc.height!==bh)this.bc.height=bh;
     const bt=this.bc.getContext('2d');bt.globalCompositeOperation='copy';bt.imageSmoothingQuality='high';bt.drawImage(this.cv,0,0,bw,bh);
@@ -556,16 +520,14 @@ class Game{
     bar(16,16,220,20,p.hp/p.mhp,'#b02828','HP '+Math.ceil(p.hp)+' / '+p.mhp);bar(16,44,220,10,p.xp/p.xpn,'#3aa0d0','');
     c.fillStyle='#e8d9b5';c.fillText('Lv '+p.lvl+'   Floor '+this.floor+(this.mk?' (Market)':this.boss?' (Boss floor)':'')+'   Gold '+p.gold,16,76);
     c.fillText('Potions '+p.pot+' [Q]   Weapon T'+p.wt+'   Armor T'+p.at+'   [E] Inventory',16,96);
-    // dash cooldown ring
     const rx=W/2,ry=H-34,rd=Math.max(0,p.dcd)/1.1;c.strokeStyle='#000a';c.lineWidth=7;c.beginPath();c.arc(rx,ry,16,0,TAU);c.stroke();
     c.strokeStyle=rd>0?'#a07030':'#60e0a0';c.beginPath();c.arc(rx,ry,16,-Math.PI/2,-Math.PI/2+TAU*(1-rd));c.stroke();c.lineWidth=1;
     c.textAlign='center';c.fillStyle='#e8d9b5';c.fillText('Dash',rx,ry+34);
-    // minimap
     const s=3,mw=MW*s,mh=MH*s,mx=W-mw-14,my=14;c.fillStyle='rgba(0,0,0,.45)';c.fillRect(mx-3,my-3,mw+6,mh+6);c.strokeStyle='#8a5a28';c.strokeRect(mx-3,my-3,mw+6,mh+6);
     for(let y=0;y<MH;y++)for(let x=0;x<MW;x++)if(this.d.ex[y][x]&&!this.d.g[y][x]){c.fillStyle='rgba(200,170,120,.65)';c.fillRect(mx+x*s,my+y*s,s,s)}
     const sx=this.stairs.x/T|0,sy=this.stairs.y/T|0;if(this.d.ex[sy][sx]){c.fillStyle='#ffb040';c.fillRect(mx+sx*s-1,my+sy*s-1,5,5)}
     c.fillStyle='#50ff80';c.fillRect(mx+(p.x/T|0)*s-1,my+(p.y/T|0)*s-1,5,5);
-    const ns=this.stalls.find(q=>!q.sold&&Math.hypot(q.x-p.x,q.y-p.y)<46); // offer details when standing at a stall
+    const ns=this.stalls.find(q=>!q.sold&&Math.hypot(q.x-p.x,q.y-p.y)<46);
     if(ns){const i=ns.it;c.textAlign='center';c.fillStyle='rgba(10,6,4,.88)';c.fillRect(W/2-190,H-156,380,88);c.strokeStyle=RC[i.r];c.strokeRect(W/2-190,H-156,380,88);
       c.font='bold 16px Georgia';c.fillStyle=RC[i.r];c.fillText(i.n+'  ('+RN[i.r]+')',W/2,H-130);c.font='13px Georgia';c.fillStyle='#e8d9b5';c.fillText(i.d,W/2,H-108);
       c.fillStyle=p.gold>=i.cost?'#ffd040':'#ff6060';c.font='bold 15px Georgia';c.fillText('[F] Buy for '+i.cost+' gold',W/2,H-82)}
@@ -580,5 +542,4 @@ class Game{
     this.rdt=dt;this.render();requestAnimationFrame(t=>this.frame(t));
   }
 }
-new Game();
-</script></body></html>
+new Game();</script></body></html>
